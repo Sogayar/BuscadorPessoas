@@ -1,0 +1,16 @@
+{
+  "out_dir": "./saidas",
+  "n_top": 3,
+  "include_news": true,
+  "include_org": true,
+  "build_index_csv": false,
+
+  "export_pdf": true,
+  "export_html": false,
+
+  "filters": {
+    "cpf": "",
+    "city": "",
+    "uf": ""
+  }
+}
