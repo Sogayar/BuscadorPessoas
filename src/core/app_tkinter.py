@@ -8,13 +8,13 @@ from dotenv import load_dotenv
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-# ====== NOVO: roteador de cotas ======
+# ====== roteador de cotas ======
 from src.core.search_router import init_db, QuotaAwareRouter
 
 # =========================
 # Config e Utilidades
 # =========================
-APP_TITLE = "Buscador Rápido — Notícias + Orgânicos por pessoa (quota-aware)"
+APP_TITLE = "Sistema de Investigação OSINT — Auditoria (quota-aware)"
 SETTINGS_FILE = "settings.json"
 
 load_dotenv()
@@ -116,6 +116,7 @@ def extract_main_text(url: str, person_name: str | None = None) -> str:
                 return extracted
     except Exception:
         pass
+
     # 2) Fallback: BeautifulSoup + poda de seções
     try:
         r = requests.get(url, headers=UA, timeout=30); r.raise_for_status()
@@ -150,9 +151,9 @@ def filter_and_rank_urls(urls: list[str], person_name: str, n: int) -> list[str]
     kept = []
     for u in urls:
         if is_low_signal_url(u):
-            # opcional: logue descartes aqui
             continue
         kept.append(u)
+
     urls = kept
     previews = {}
     for u in urls[:12]:
@@ -161,6 +162,7 @@ def filter_and_rank_urls(urls: list[str], person_name: str, n: int) -> list[str]
             previews[u] = (trafilatura.extract(d, favor_precision=True) or "")[:2000] if d else ""
         except Exception:
             previews[u] = ""
+
     scored = sorted(urls, key=lambda u: _score_url_for_person(u, person_name, previews.get(u,"")), reverse=True)
     return scored[:n]
 
@@ -233,16 +235,8 @@ class BuscadorWorker(threading.Thread):
         tx = extract_main_text(url, person_name=person)
         if not tx or len(tx) < 100:
             return ""
-        name = person.lower()
-        parts = [p for p in name.split() if p]
-        last = parts[-1] if len(parts) >= 2 else None
-        # if (name not in tx.lower()) and (not last or f" {last} " not in tx.lower()):
-        #     return ""
         return tx
 
-    # =========================
-    # Runner principal do worker
-    # =========================
     def run(self):
         total = len(self.names)
         completed = 0
@@ -312,7 +306,7 @@ class BuscadorWorker(threading.Thread):
                             continue
 
                         bloco_formatado = (
-                            f"\n\n=== CATEGORIA: {category.upper()} ===\n"
+                            f"\n\n=== CATEGORIA: {str(category).upper()} ===\n"
                             f"URL: {u}\n\n"
                             f"{txt}\n"
                         )
@@ -321,10 +315,6 @@ class BuscadorWorker(threading.Thread):
 
                         rank += 1
                         time.sleep(self.sleep_between)
-
-                # =============================
-                # MONTA RELATÓRIO FINAL
-                # =============================
 
                 final_text = (
                     f"# Relatório Estratégico — {person}\n"
@@ -366,8 +356,11 @@ class App(tk.Tk):
         self.router = QuotaAwareRouter()
 
         # Janela
-        try: self.state("zoomed")
-        except Exception: pass
+        try:
+            self.state("zoomed")
+        except Exception:
+            pass
+
         self.update_idletasks()
         self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         self.minsize(880, 560)
@@ -400,6 +393,21 @@ class App(tk.Tk):
         self.include_org = tk.BooleanVar(value=bool(s.get("include_org", True)))
         self.build_index_csv = tk.BooleanVar(value=bool(s.get("build_index_csv", False)))
 
+        # ===== NOVO: variáveis anti-homônimo + estratégia =====
+        filters = (s or {}).get("filters", {}) or {}
+        strategy = (s or {}).get("strategy", {}) or {}
+
+        self.filter_city = tk.StringVar(value=str(filters.get("city", "")))
+        self.filter_uf = tk.StringVar(value=str(filters.get("uf", "")))
+        self.filter_role = tk.StringVar(value=str(filters.get("role", "")))
+        self.filter_akas = tk.StringVar(value=str(filters.get("akas", "")))
+        self.filter_party = tk.StringVar(value=str(filters.get("party", "")))
+        self.filter_doc = tk.StringVar(value=str(filters.get("doc", "")))  # CPF/CNPJ
+
+        self.search_mode = tk.StringVar(value=str(strategy.get("mode", "Híbrido (recomendado)")))
+        self.min_score = tk.IntVar(value=int(strategy.get("min_score", 60)))
+        self.enable_clusters = tk.BooleanVar(value=bool(strategy.get("enable_clusters", True)))
+
         os.makedirs(self.out_dir.get(), exist_ok=True)
 
         self._build_ui()
@@ -417,144 +425,299 @@ class App(tk.Tk):
 
     def restore_window(self):
         try:
-            self.state("normal"); self.attributes("-fullscreen", False)
+            self.state("normal")
+            self.attributes("-fullscreen", False)
         except Exception:
             pass
 
     # UI
     def _build_ui(self):
-        header = ttk.Frame(self, padding=(12, 12, 12, 6)); header.pack(fill="x")
-        ttk.Label(header, text="Buscador rápido", font=("Segoe UI", 14, "bold")).pack(side="left")
-        ttk.Label(header, text=" — cole nomes, escolha as opções e gere um arquivo por pessoa.").pack(side="left")
+        header = ttk.Frame(self, padding=(12, 12, 12, 6))
+        header.pack(fill="x")
 
-        dir_frame = ttk.Frame(self, padding=(12, 6, 12, 6)); dir_frame.pack(fill="x")
+        ttk.Label(header, text="Sistema de Investigação OSINT", font=("Segoe UI", 14, "bold")).pack(side="left")
+        ttk.Label(header, text=" — auditoria (anti-homônimo) com roteamento de cotas.").pack(side="left")
+
+        # Pasta de saída
+        dir_frame = ttk.Frame(self, padding=(12, 6, 12, 6))
+        dir_frame.pack(fill="x")
+
         ttk.Label(dir_frame, text="Pasta de saída:").pack(side="left")
-        self.out_entry = ttk.Entry(dir_frame, textvariable=self.out_dir); self.out_entry.pack(side="left", fill="x", expand=True, padx=8)
-        ttk.Button(dir_frame, text="Escolher…", command=self.choose_dir).pack(side="left", padx=(0,8))
+        self.out_entry = ttk.Entry(dir_frame, textvariable=self.out_dir)
+        self.out_entry.pack(side="left", fill="x", expand=True, padx=8)
+
+        ttk.Button(dir_frame, text="Escolher…", command=self.choose_dir).pack(side="left", padx=(0, 8))
         ttk.Button(dir_frame, text="Abrir pasta", command=self.open_dir).pack(side="left")
 
-        body = ttk.Frame(self, padding=(12, 6, 12, 12)); body.pack(fill="both", expand=True)
-        left = ttk.Frame(body); left.pack(side="left", fill="both", expand=True, padx=(0,6))
-        right = ttk.Frame(body); right.pack(side="left", fill="both", expand=True, padx=(6,0))
+        # Corpo
+        body = ttk.Frame(self, padding=(12, 6, 12, 12))
+        body.pack(fill="both", expand=True)
 
-        ttk.Label(left, text="Nomes (um por linha):").pack(anchor="w")
-        self.names_txt = tk.Text(left, height=16, wrap="none", undo=True); self.names_txt.pack(fill="both", expand=True)
-        self.placeholder = "Ex.: Maria Silva\nJoão Pereira\n…"
+        left = ttk.Frame(body)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+
+        right = ttk.Frame(body)
+        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
+
+        # ESQUERDA: Investigados
+        ttk.Label(left, text="Investigados (um por linha):").pack(anchor="w")
+
+        self.names_txt = tk.Text(left, height=16, wrap="none", undo=True)
+        self.names_txt.pack(fill="both", expand=True)
+
+        self.placeholder = "Ex.: João Silva\nMaria Pereira\n..."
         self._placeholder_active = True
         self._set_placeholder()
         self.names_txt.bind("<FocusIn>", self._on_focus_in)
         self.names_txt.bind("<FocusOut>", self._on_focus_out)
 
-        actions = ttk.Frame(left); actions.pack(fill="x", pady=(6,0))
+        actions = ttk.Frame(left)
+        actions.pack(fill="x", pady=(6, 0))
+
         ttk.Button(actions, text="Colar da área de transferência", command=self.paste_clip).pack(side="left")
-        ttk.Button(actions, text="Importar .txt", command=self.import_txt).pack(side="left", padx=(8,0))
-        ttk.Button(actions, text="Limpar", command=self.clear_names).pack(side="left", padx=(8,0))
+        ttk.Button(actions, text="Importar .txt", command=self.import_txt).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Limpar", command=self.clear_names).pack(side="left", padx=(8, 0))
 
-        opts = ttk.LabelFrame(right, text="Opções", padding=10); opts.pack(fill="x")
-        row1 = ttk.Frame(opts); row1.pack(fill="x", pady=2)
-        ttk.Label(row1, text="Resultados por tipo (1–10):").pack(side="left")
-        self.top_spin = ttk.Spinbox(row1, from_=1, to=10, textvariable=self.n_top, width=5); self.top_spin.pack(side="left", padx=(6,12))
-        self.cb_news = ttk.Checkbutton(row1, text="Incluir Notícias", variable=self.include_news); self.cb_news.pack(side="left", padx=(0,12))
-        self.cb_org = ttk.Checkbutton(row1, text="Incluir Buscas Orgânicas", variable=self.include_org); self.cb_org.pack(side="left")
+        # DIREITA: Caracterização anti-homônimo
+        lf_profile = ttk.LabelFrame(right, text="Caracterização do investigado (anti-homônimo)", padding=10)
+        lf_profile.pack(fill="x")
 
-        row2 = ttk.Frame(opts); row2.pack(fill="x", pady=2)
-        self.cb_index = ttk.Checkbutton(row2, text="Gerar CSV-índice dos links", variable=self.build_index_csv); self.cb_index.pack(side="left")
+        r1 = ttk.Frame(lf_profile); r1.pack(fill="x", pady=2)
+        ttk.Label(r1, text="Cidade:", width=10).pack(side="left")
+        ttk.Entry(r1, textvariable=self.filter_city).pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ttk.Label(r1, text="UF:", width=4).pack(side="left")
+        ttk.Entry(r1, textvariable=self.filter_uf, width=6).pack(side="left")
 
-        log_box = ttk.LabelFrame(right, text="Log", padding=10); log_box.pack(fill="both", expand=True, pady=(8,0))
-        self.log_txt = tk.Text(log_box, height=14, state="disabled", wrap="word"); self.log_txt.pack(side="left", fill="both", expand=True)
-        log_scroll = ttk.Scrollbar(log_box, command=self.log_txt.yview); log_scroll.pack(side="right", fill="y")
+        r2 = ttk.Frame(lf_profile); r2.pack(fill="x", pady=2)
+        ttk.Label(r2, text="Cargo:", width=10).pack(side="left")
+        ttk.Entry(r2, textvariable=self.filter_role).pack(side="left", fill="x", expand=True)
+
+        r3 = ttk.Frame(lf_profile); r3.pack(fill="x", pady=2)
+        ttk.Label(r3, text="Apelidos:", width=10).pack(side="left")
+        ttk.Entry(r3, textvariable=self.filter_akas).pack(side="left", fill="x", expand=True)
+
+        r4 = ttk.Frame(lf_profile); r4.pack(fill="x", pady=2)
+        ttk.Label(r4, text="Partido/Órgão:", width=14).pack(side="left")
+        ttk.Entry(r4, textvariable=self.filter_party).pack(side="left", fill="x", expand=True)
+
+        r5 = ttk.Frame(lf_profile); r5.pack(fill="x", pady=2)
+        ttk.Label(r5, text="CPF/CNPJ:", width=10).pack(side="left")
+        ttk.Entry(r5, textvariable=self.filter_doc).pack(side="left", fill="x", expand=True)
+
+        ttk.Label(
+            lf_profile,
+            text="Dica: cidade/UF + cargo + apelidos reduzem homônimos. CPF/CNPJ (quando houver) aumenta a precisão.",
+            foreground="#444"
+        ).pack(anchor="w", pady=(6, 0))
+
+        # DIREITA: Estratégia
+        lf_strategy = ttk.LabelFrame(right, text="Estratégia de busca", padding=10)
+        lf_strategy.pack(fill="x", pady=(8, 0))
+
+        s1 = ttk.Frame(lf_strategy); s1.pack(fill="x", pady=2)
+        ttk.Label(s1, text="Modo:", width=10).pack(side="left")
+        ttk.Combobox(
+            s1,
+            textvariable=self.search_mode,
+            values=["Híbrido (recomendado)", "Precisão (anti-homônimo)", "Amplo (maior cobertura)"],
+            state="readonly"
+        ).pack(side="left", fill="x", expand=True)
+
+        s2 = ttk.Frame(lf_strategy); s2.pack(fill="x", pady=2)
+        ttk.Label(s2, text="Score mín.:", width=10).pack(side="left")
+        ttk.Spinbox(s2, from_=0, to=100, textvariable=self.min_score, width=6).pack(side="left", padx=(0, 10))
+        ttk.Checkbutton(
+            s2,
+            text="Agrupar possíveis homônimos (clusters)",
+            variable=self.enable_clusters
+        ).pack(side="left")
+
+        # DIREITA: Opções
+        lf_opts = ttk.LabelFrame(right, text="Opções", padding=10)
+        lf_opts.pack(fill="x", pady=(8, 0))
+
+        o1 = ttk.Frame(lf_opts); o1.pack(fill="x", pady=2)
+        ttk.Label(o1, text="Resultados por tipo (1–10):").pack(side="left")
+        ttk.Spinbox(o1, from_=1, to=10, textvariable=self.n_top, width=5).pack(side="left", padx=(6, 12))
+        ttk.Checkbutton(o1, text="Incluir Notícias", variable=self.include_news).pack(side="left", padx=(0, 12))
+        ttk.Checkbutton(o1, text="Incluir Buscas Orgânicas", variable=self.include_org).pack(side="left")
+
+        o2 = ttk.Frame(lf_opts); o2.pack(fill="x", pady=2)
+        ttk.Checkbutton(o2, text="(Avançado) Gerar CSV-índice dos links", variable=self.build_index_csv).pack(side="left")
+
+        # DIREITA: Log
+        log_box = ttk.LabelFrame(right, text="Log de auditoria", padding=10)
+        log_box.pack(fill="both", expand=True, pady=(8, 0))
+
+        self.log_txt = tk.Text(log_box, height=14, state="disabled", wrap="word")
+        self.log_txt.pack(side="left", fill="both", expand=True)
+
+        log_scroll = ttk.Scrollbar(log_box, command=self.log_txt.yview)
+        log_scroll.pack(side="right", fill="y")
         self.log_txt.config(yscrollcommand=log_scroll.set)
 
-        bottom = ttk.Frame(self, padding=(12, 6, 12, 12)); bottom.pack(fill="x")
-        self.progress = ttk.Progressbar(bottom, mode="determinate", maximum=100); self.progress.pack(fill="x", side="left", expand=True)
-        self.progress_label = ttk.Label(bottom, text="0/0", width=6, anchor="e"); self.progress_label.pack(side="left", padx=(6,12))
-        self.btn_start = ttk.Button(bottom, text="Iniciar", command=self.on_start); self.btn_start.pack(side="left")
-        self.btn_stop = ttk.Button(bottom, text="Cancelar", command=self.on_stop, state="disabled"); self.btn_stop.pack(side="left", padx=(8,0))
+        # Rodapé
+        bottom = ttk.Frame(self, padding=(12, 6, 12, 12))
+        bottom.pack(fill="x")
 
-    # placeholder
+        self.progress = ttk.Progressbar(bottom, mode="determinate", maximum=100)
+        self.progress.pack(fill="x", side="left", expand=True)
+
+        self.progress_label = ttk.Label(bottom, text="0/0", width=6, anchor="e")
+        self.progress_label.pack(side="left", padx=(6, 12))
+
+        self.btn_start = ttk.Button(bottom, text="Iniciar investigação", command=self.on_start)
+        self.btn_start.pack(side="left")
+
+        self.btn_stop = ttk.Button(bottom, text="Cancelar", command=self.on_stop, state="disabled")
+        self.btn_stop.pack(side="left", padx=(8, 0))
+
+    # =========================
+    # Perfil / Settings
+    # =========================
+    def _read_profile_from_ui(self) -> dict:
+        return {
+            "filters": {
+                "city": (self.filter_city.get() or "").strip(),
+                "uf": (self.filter_uf.get() or "").strip().upper(),
+                "role": (self.filter_role.get() or "").strip(),
+                "akas": (self.filter_akas.get() or "").strip(),
+                "party": (self.filter_party.get() or "").strip(),
+                "doc": (self.filter_doc.get() or "").strip(),
+            },
+            "strategy": {
+                "mode": (self.search_mode.get() or "").strip(),
+                "min_score": int(self.min_score.get() or 0),
+                "enable_clusters": bool(self.enable_clusters.get()),
+            }
+        }
+
+    # =========================
+    # Placeholder / Entrada
+    # =========================
     def _set_placeholder(self):
-        self.names_txt.config(fg="#666"); self.names_txt.delete("1.0", "end"); self.names_txt.insert("1.0", self.placeholder); self._placeholder_active = True
+        self.names_txt.config(fg="#666")
+        self.names_txt.delete("1.0", "end")
+        self.names_txt.insert("1.0", self.placeholder)
+        self._placeholder_active = True
+
     def _on_focus_in(self, _):
         if self._placeholder_active:
-            self.names_txt.delete("1.0", "end"); self.names_txt.config(fg="#000"); self._placeholder_active = False
+            self.names_txt.delete("1.0", "end")
+            self.names_txt.config(fg="#000")
+            self._placeholder_active = False
+
     def _on_focus_out(self, _):
         content = self.names_txt.get("1.0", "end").strip()
-        if not content: self._set_placeholder()
+        if not content:
+            self._set_placeholder()
 
     # ações nomes
     def paste_clip(self):
         try:
             text = self.clipboard_get()
             if self._placeholder_active:
-                self.names_txt.delete("1.0", "end"); self._placeholder_active = False
-            self.names_txt.config(fg="#000"); self.names_txt.insert("end", text)
+                self.names_txt.delete("1.0", "end")
+                self._placeholder_active = False
+            self.names_txt.config(fg="#000")
+            self.names_txt.insert("end", text)
         except Exception:
             messagebox.showwarning("Atenção", "Não foi possível ler a área de transferência.")
 
     def import_txt(self):
-        path = filedialog.askopenfilename(title="Importar nomes de arquivo .txt", filetypes=[("Texto","*.txt"),("Todos os arquivos","*.*")])
-        if not path: return
+        path = filedialog.askopenfilename(
+            title="Importar nomes de arquivo .txt",
+            filetypes=[("Texto","*.txt"),("Todos os arquivos","*.*")]
+        )
+        if not path:
+            return
         try:
-            with open(path, "r", encoding="utf-8") as f: data = f.read()
+            with open(path, "r", encoding="utf-8") as f:
+                data = f.read()
             if self._placeholder_active:
-                self.names_txt.delete("1.0", "end"); self._placeholder_active = False; self.names_txt.config(fg="#000")
+                self.names_txt.delete("1.0", "end")
+                self._placeholder_active = False
+                self.names_txt.config(fg="#000")
             self.names_txt.insert("end", data if data.endswith("\n") else data + "\n")
         except Exception as e:
             messagebox.showerror("Erro", f"Falha ao importar: {e}")
 
     def clear_names(self):
-        self.names_txt.delete("1.0", "end"); self._placeholder_active = False; self.names_txt.config(fg="#000")
+        self.names_txt.delete("1.0", "end")
+        self._placeholder_active = False
+        self.names_txt.config(fg="#000")
 
     # pasta
     def choose_dir(self):
         chosen = filedialog.askdirectory(initialdir=self.out_dir.get(), title="Escolha a pasta de saída")
         if chosen:
-            self.out_dir.set(chosen); self._persist_settings()
+            self.out_dir.set(chosen)
+            self._persist_settings()
 
     def open_dir(self):
         folder = self.out_dir.get().strip()
         if not os.path.isdir(folder):
-            messagebox.showwarning("Atenção", "A pasta configurada não existe."); return
+            messagebox.showwarning("Atenção", "A pasta configurada não existe.")
+            return
         try:
-            if os.name == "nt": os.startfile(folder)  # type: ignore
-            elif sys.platform == "darwin": os.system(f'open "{folder}"')
-            else: os.system(f'xdg-open "{folder}"')
+            if os.name == "nt":
+                os.startfile(folder)  # type: ignore
+            elif sys.platform == "darwin":
+                os.system(f'open "{folder}"')
+            else:
+                os.system(f'xdg-open "{folder}"')
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível abrir a pasta: {e}")
 
     # execução
     def on_start(self):
         if self.worker and self.worker.is_alive():
-            messagebox.showinfo("Em execução", "Já existe uma execução em andamento."); return
+            messagebox.showinfo("Em execução", "Já existe uma execução em andamento.")
+            return
 
         names_raw = self.names_txt.get("1.0", "end")
-        if self._placeholder_active: names_raw = ""
+        if self._placeholder_active:
+            names_raw = ""
         names = [n.strip() for n in names_raw.splitlines() if n.strip()]
+
         if not names:
-            messagebox.showwarning("Atenção", "Informe ao menos um nome (um por linha)."); return
+            messagebox.showwarning("Atenção", "Informe ao menos um nome (um por linha).")
+            return
 
         try:
             n_top_val = int(self.n_top.get())
-            if n_top_val < 1 or n_top_val > 10: raise ValueError
+            if n_top_val < 1 or n_top_val > 10:
+                raise ValueError
         except Exception:
-            messagebox.showwarning("Atenção", "O número de resultados por tipo deve ser entre 1 e 10."); return
+            messagebox.showwarning("Atenção", "O número de resultados por tipo deve ser entre 1 e 10.")
+            return
 
-        include_news = bool(self.include_news.get()); include_org = bool(self.include_org.get())
+        include_news = bool(self.include_news.get())
+        include_org = bool(self.include_org.get())
         if not include_news and not include_org:
-            messagebox.showwarning("Atenção", "Selecione ao menos um tipo: Notícias ou Orgânicos."); return
+            messagebox.showwarning("Atenção", "Selecione ao menos um tipo: Notícias ou Orgânicos.")
+            return
 
         out_dir = self.out_dir.get().strip()
-        try: os.makedirs(out_dir, exist_ok=True)
+        try:
+            os.makedirs(out_dir, exist_ok=True)
         except Exception as e:
-            messagebox.showerror("Erro", f"Não foi possível criar/acessar a pasta de saída: {e}"); return
+            messagebox.showerror("Erro", f"Não foi possível criar/acessar a pasta de saída: {e}")
+            return
 
+        # Persist settings (inclui filtros/estratégia)
         self._persist_settings()
 
-        self.stop_event.clear(); self.total_names = len(names); self.done_count = 0
-        self.progress["value"] = 0; self._set_progress_label(0, self.total_names)
+        self.stop_event.clear()
+        self.total_names = len(names)
+        self.done_count = 0
+
+        self.progress["value"] = 0
+        self._set_progress_label(0, self.total_names)
         self._append_log("=== Iniciando ===")
 
-        self.btn_start.config(state="disabled"); self.btn_stop.config(state="normal")
+        self.btn_start.config(state="disabled")
+        self.btn_stop.config(state="normal")
 
         index_rows_acc = [] if self.build_index_csv.get() else None
 
@@ -601,17 +764,23 @@ class App(tk.Tk):
                     self._append_log(f"📄 CSV-índice gerado: {csv_path}")
                 except Exception as e:
                     self._append_log(f"⚠ Falha ao gerar CSV-índice: {e}")
-            self.btn_start.config(state="normal"); self.btn_stop.config(state="disabled")
+
+            self.btn_start.config(state="normal")
+            self.btn_stop.config(state="disabled")
             self._append_log("=== Finalizado ===")
         self.after(0, finish)
 
     def _append_log(self, msg: str):
-        self.log_txt.config(state="normal"); self.log_txt.insert("end", msg + "\n"); self.log_txt.see("end"); self.log_txt.config(state="disabled")
+        self.log_txt.config(state="normal")
+        self.log_txt.insert("end", msg + "\n")
+        self.log_txt.see("end")
+        self.log_txt.config(state="disabled")
 
     def _poll_log(self):
         try:
             while True:
-                msg = self.log_q.get_nowait(); self._append_log(msg)
+                msg = self.log_q.get_nowait()
+                self._append_log(msg)
         except queue.Empty:
             pass
         self.after(100, self._poll_log)
@@ -624,8 +793,12 @@ class App(tk.Tk):
             "include_org": bool(self.include_org.get()),
             "build_index_csv": bool(self.build_index_csv.get()),
         }
+        data.update(self._read_profile_from_ui())
         save_settings(data)
 
+# =========================
+# Helpers settings
+# =========================
 def safe_filename(name: str) -> str:
     base = re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_")
     return base or "resultado"
@@ -633,13 +806,16 @@ def safe_filename(name: str) -> str:
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f: return json.load(f)
-        except Exception: return {}
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
     return {}
 
 def save_settings(data: dict):
     try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
