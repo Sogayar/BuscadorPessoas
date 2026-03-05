@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from src.utils.identity import qualify_news  
 
+from src.utils.dorks import get_dorks
 
 # =========================
 # CONFIG
@@ -59,9 +60,17 @@ ANTI_DUP_WINDOW_SECONDS  = int(os.getenv("ANTI_DUP_WINDOW_SECONDS", "900"))# 15 
 # DB / LOG
 # =========================
 def get_conn():
-    conn = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=30,
+        isolation_level=None,
+        check_same_thread=False
+    )
+
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA busy_timeout = 30000;")
+
     return conn
 
 def today_str() -> str:
@@ -427,6 +436,38 @@ class QuotaAwareRouter:
       - Google News RSS (aspas + domínios BR; se pouco, sem domínio)
       - Fallback GDELT
     """
+    def search_all_dorks(self, name: str, user_id=None):
+        """
+        Executa todos os dorks sequencialmente
+        e retorna lista estruturada por categoria.
+        """
+
+        dorks = get_dorks(name)
+        results = []
+
+        for d in dorks:
+
+            category = d.get("category")
+            query = d.get("query")
+
+            try:
+                result = self.search(query, user_id=user_id)
+
+                results.append({
+                    "category": category,
+                    "query": query,
+                    "provider": result.get("provider"),
+                    "response": result.get("response"),
+                })
+
+            except Exception as e:
+                results.append({
+                    "category": category,
+                    "query": query,
+                    "error": str(e)
+                })
+
+        return results
 
     def __init__(self):
         self.providers: Dict[str, "ProviderBase"] = {
