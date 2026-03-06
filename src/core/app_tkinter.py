@@ -8,12 +8,8 @@ from dotenv import load_dotenv
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-# ====== roteador de cotas ======
 from src.core.search_router import init_db, QuotaAwareRouter
 
-# =========================
-# Config e Utilidades
-# =========================
 APP_TITLE = "Sistema de Investigação OSINT — Auditoria (quota-aware)"
 SETTINGS_FILE = "settings.json"
 
@@ -33,9 +29,6 @@ def clean_text(txt: str) -> str:
     txt = re.sub(r"[ \t]{2,}", " ", txt)
     return txt.strip()
 
-# =========================
-# Filtros e ranqueamento de URLs (AUDIT-READY)
-# =========================
 BLOCKED_DOMAINS = {
     "instagram.com","www.instagram.com",
     "x.com","twitter.com","mobile.twitter.com",
@@ -95,7 +88,6 @@ def _keep_person_paragraphs(text: str, person_name: str) -> str:
     return "\n\n".join(kept) if kept else text
 
 def extract_main_text(url: str, person_name: str | None = None) -> str:
-    # 1) Trafilatura com foco em precisão
     try:
         downloaded = trafilatura.fetch_url(url, no_ssl=True)
         if downloaded:
@@ -117,7 +109,6 @@ def extract_main_text(url: str, person_name: str | None = None) -> str:
     except Exception:
         pass
 
-    # 2) Fallback: BeautifulSoup + poda de seções
     try:
         r = requests.get(url, headers=UA, timeout=30); r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
@@ -153,8 +144,8 @@ def filter_and_rank_urls(urls: list[str], person_name: str, n: int) -> list[str]
         if is_low_signal_url(u):
             continue
         kept.append(u)
-
     urls = kept
+
     previews = {}
     for u in urls[:12]:
         try:
@@ -166,9 +157,6 @@ def filter_and_rank_urls(urls: list[str], person_name: str, n: int) -> list[str]
     scored = sorted(urls, key=lambda u: _score_url_for_person(u, person_name, previews.get(u,"")), reverse=True)
     return scored[:n]
 
-# =========================
-# Normalização dos payloads por provedor
-# =========================
 def pick_news_urls(payload: dict, n=3):
     out = []
     if isinstance(payload.get("news"), list):
@@ -188,15 +176,15 @@ def pick_news_urls(payload: dict, n=3):
 
 def pick_organic_urls(payload: dict, n=3):
     out = []
-    if isinstance(payload.get("items"), list):  # Google CSE
+    if isinstance(payload.get("items"), list):
         for it in payload["items"]:
             link = it.get("link")
             if link: out.append(link)
-    if isinstance(payload.get("organic"), list):  # Serper / Zenserp
+    if isinstance(payload.get("organic"), list):
         for it in payload["organic"]:
             link = it.get("link") or it.get("url")
             if link: out.append(link)
-    if isinstance(payload.get("organic_results"), list):  # Serpstack
+    if isinstance(payload.get("organic_results"), list):
         for it in payload["organic_results"]:
             link = it.get("url") or it.get("link")
             if link: out.append(link)
@@ -206,9 +194,26 @@ def pick_organic_urls(payload: dict, n=3):
             seen.add(u); dedup.append(u)
     return dedup[:n]
 
-# =========================
-# Worker (thread)
-# =========================
+def safe_filename(name: str) -> str:
+    base = re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_")
+    return base or "resultado"
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_settings(data: dict):
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 class BuscadorWorker(threading.Thread):
     def __init__(self, names, out_dir, log_q, progress_cb, done_cb, stop_event,
                  sleep_between=0.6, n_top=3, include_news=True, include_org=True,
@@ -242,8 +247,24 @@ class BuscadorWorker(threading.Thread):
         completed = 0
 
         try:
-            for name in self.names:
+            settings = load_settings()
+            filters = (settings or {}).get("filters", {}) or {}
+            strategy = (settings or {}).get("strategy", {}) or {}
 
+            profile = {
+                "city": (filters.get("city") or "").strip(),
+                "uf": (filters.get("uf") or "").strip(),
+                "role": (filters.get("role") or "").strip(),
+                "akas": (filters.get("akas") or "").strip(),
+                "party": (filters.get("party") or "").strip(),
+                "doc": (filters.get("doc") or "").strip(),
+            }
+
+            strategy_mode = (strategy.get("mode") or "Híbrido (recomendado)")
+            min_score = int(strategy.get("min_score") or 40)
+            enable_clusters = bool(strategy.get("enable_clusters", True))
+
+            for name in self.names:
                 if self.stop_event.is_set():
                     self.log("➡ Execução cancelada pelo usuário.")
                     break
@@ -255,19 +276,70 @@ class BuscadorWorker(threading.Thread):
                     continue
 
                 self.log(f"\n🔎 Iniciando varredura estratégica: {person}")
+                self.log(
+                    "   • Perfil aplicado: "
+                    f"cidade={profile['city'] or '-'} | "
+                    f"uf={profile['uf'] or '-'} | "
+                    f"cargo={profile['role'] or '-'} | "
+                    f"apelidos={profile['akas'] or '-'} | "
+                    f"partido/órgão={profile['party'] or '-'} | "
+                    f"doc={profile['doc'] or '-'}"
+                )
+                self.log(
+                    "   • Estratégia: "
+                    f"modo={strategy_mode} | min_score={min_score} | clusters={enable_clusters}"
+                )
+
+
+
+
 
                 try:
-                    blocks = self.router.search_all_dorks(person, user_id="tk")
+                    if self.router is None:
+                        self.log("⚠ Router não inicializado")
+                        blocks = []
+                    else:
+                        blocks = self.router.search_all_dorks(
+                            person,
+                            user_id="tk",
+                            profile=profile,
+                            strategy=strategy_mode
+                        )
                 except Exception as e:
                     self.log(f"⚠ Erro na execução dos dorks: {e}")
-                    completed += 1
-                    self.progress_cb(completed, total)
-                    continue
+                    blocks = []
+
+                # fallback: notícias gratuitas
+                free_news_payload = None
+                try:
+                    if self.router is None:
+                        self.log("⚠ Router não inicializado")
+                        free_news = {}
+                    else:
+                        free_news = self.router.search_news_free(
+                            person=person,
+                            user_id="tk",
+                            max_n=max(6, self.n_top * 2),
+                            profile=profile,
+                            min_score=min_score
+                        )
+                    free_news_payload = free_news.get("response", {})
+                    self.log(
+                        f"   • Fallback notícias gratuitas via "
+                        f"{free_news.get('provider', 'desconhecido')}: "
+                        f"{len((free_news_payload or {}).get('news', []))} itens"
+                    )
+                except Exception as e:
+                    self.log(f"⚠ Erro no fallback de notícias gratuitas: {e}")
+
+
+
+
+
 
                 all_text_blocks = []
 
                 for block in blocks:
-
                     if self.stop_event.is_set():
                         break
 
@@ -282,10 +354,10 @@ class BuscadorWorker(threading.Thread):
                         continue
 
                     news_raw = pick_news_urls(payload, n=10) if self.include_news else []
-                    org_raw  = pick_organic_urls(payload, n=10) if self.include_org else []
+                    org_raw = pick_organic_urls(payload, n=10) if self.include_org else []
 
                     urls = news_raw + org_raw
-                    urls = list(dict.fromkeys(urls))  # remove duplicados
+                    urls = list(dict.fromkeys(urls))
 
                     ranked_urls = filter_and_rank_urls(urls, person, n=self.n_top)
 
@@ -293,12 +365,10 @@ class BuscadorWorker(threading.Thread):
 
                     rank = 1
                     for u in ranked_urls:
-
                         if self.stop_event.is_set():
                             break
 
                         self.log(f"     - Extraindo {rank}: {u}")
-
                         txt = self._extract_valid(u, person)
 
                         if not txt:
@@ -310,8 +380,10 @@ class BuscadorWorker(threading.Thread):
                             f"URL: {u}\n\n"
                             f"{txt}\n"
                         )
-
                         all_text_blocks.append(bloco_formatado)
+
+                        if self.build_index_csv:
+                            self.index_rows_acc.append([person, str(category), rank, u])
 
                         rank += 1
                         time.sleep(self.sleep_between)
@@ -319,6 +391,17 @@ class BuscadorWorker(threading.Thread):
                 final_text = (
                     f"# Relatório Estratégico — {person}\n"
                     f"Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
+                    f"{'='*80}\n"
+                    f"Perfil aplicado:\n"
+                    f"- Cidade: {profile['city'] or '-'}\n"
+                    f"- UF: {profile['uf'] or '-'}\n"
+                    f"- Cargo/Função: {profile['role'] or '-'}\n"
+                    f"- Apelidos: {profile['akas'] or '-'}\n"
+                    f"- Partido/Órgão: {profile['party'] or '-'}\n"
+                    f"- Documento: {profile['doc'] or '-'}\n"
+                    f"- Estratégia: {strategy_mode}\n"
+                    f"- Score mínimo: {min_score}\n"
+                    f"- Clusters habilitados: {'sim' if enable_clusters else 'não'}\n"
                     f"{'='*80}\n"
                 )
 
@@ -331,9 +414,7 @@ class BuscadorWorker(threading.Thread):
                 try:
                     with open(fpath, "w", encoding="utf-8") as f:
                         f.write(final_text)
-
                     self.log(f"\n✅ Relatório salvo: {fpath}")
-
                 except Exception as e:
                     self.log(f"⚠ Falha ao salvar '{fname}': {e}")
 
@@ -343,19 +424,14 @@ class BuscadorWorker(threading.Thread):
         finally:
             self.done_cb()
 
-# =========================
-# Interface Tkinter
-# =========================
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(APP_TITLE)
 
-        # Inicializa DB e Router
         init_db()
         self.router = QuotaAwareRouter()
 
-        # Janela
         try:
             self.state("zoomed")
         except Exception:
@@ -365,11 +441,9 @@ class App(tk.Tk):
         self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
         self.minsize(880, 560)
 
-        # Atalhos
         self.bind("<F11>", lambda e: self.toggle_maximize())
         self.bind("<Escape>", lambda e: self.restore_window())
 
-        # Estilo
         try:
             self.style = ttk.Style(self)
             if "vista" in self.style.theme_names():
@@ -377,14 +451,12 @@ class App(tk.Tk):
         except Exception:
             pass
 
-        # Estados
         self.stop_event = threading.Event()
         self.worker = None
         self.log_q = queue.Queue()
         self.total_names = 0
         self.done_count = 0
 
-        # Settings
         s = load_settings()
         default_out = s.get("out_dir", os.path.abspath("./saidas"))
         self.out_dir = tk.StringVar(value=default_out)
@@ -393,7 +465,6 @@ class App(tk.Tk):
         self.include_org = tk.BooleanVar(value=bool(s.get("include_org", True)))
         self.build_index_csv = tk.BooleanVar(value=bool(s.get("build_index_csv", False)))
 
-        # ===== NOVO: variáveis anti-homônimo + estratégia =====
         filters = (s or {}).get("filters", {}) or {}
         strategy = (s or {}).get("strategy", {}) or {}
 
@@ -402,7 +473,7 @@ class App(tk.Tk):
         self.filter_role = tk.StringVar(value=str(filters.get("role", "")))
         self.filter_akas = tk.StringVar(value=str(filters.get("akas", "")))
         self.filter_party = tk.StringVar(value=str(filters.get("party", "")))
-        self.filter_doc = tk.StringVar(value=str(filters.get("doc", "")))  # CPF/CNPJ
+        self.filter_doc = tk.StringVar(value=str(filters.get("doc", "")))
 
         self.search_mode = tk.StringVar(value=str(strategy.get("mode", "Híbrido (recomendado)")))
         self.min_score = tk.IntVar(value=int(strategy.get("min_score", 60)))
@@ -413,7 +484,6 @@ class App(tk.Tk):
         self._build_ui()
         self._poll_log()
 
-    # Helpers de tamanho
     def toggle_maximize(self):
         try:
             if self.state() == "zoomed":
@@ -430,7 +500,6 @@ class App(tk.Tk):
         except Exception:
             pass
 
-    # UI
     def _build_ui(self):
         header = ttk.Frame(self, padding=(12, 12, 12, 6))
         header.pack(fill="x")
@@ -438,7 +507,6 @@ class App(tk.Tk):
         ttk.Label(header, text="Sistema de Investigação OSINT", font=("Segoe UI", 14, "bold")).pack(side="left")
         ttk.Label(header, text=" — auditoria (anti-homônimo) com roteamento de cotas.").pack(side="left")
 
-        # Pasta de saída
         dir_frame = ttk.Frame(self, padding=(12, 6, 12, 6))
         dir_frame.pack(fill="x")
 
@@ -449,7 +517,6 @@ class App(tk.Tk):
         ttk.Button(dir_frame, text="Escolher…", command=self.choose_dir).pack(side="left", padx=(0, 8))
         ttk.Button(dir_frame, text="Abrir pasta", command=self.open_dir).pack(side="left")
 
-        # Corpo
         body = ttk.Frame(self, padding=(12, 6, 12, 12))
         body.pack(fill="both", expand=True)
 
@@ -459,7 +526,6 @@ class App(tk.Tk):
         right = ttk.Frame(body)
         right.pack(side="left", fill="both", expand=True, padx=(6, 0))
 
-        # ESQUERDA: Investigados
         ttk.Label(left, text="Investigados (um por linha):").pack(anchor="w")
 
         self.names_txt = tk.Text(left, height=16, wrap="none", undo=True)
@@ -478,7 +544,6 @@ class App(tk.Tk):
         ttk.Button(actions, text="Importar .txt", command=self.import_txt).pack(side="left", padx=(8, 0))
         ttk.Button(actions, text="Limpar", command=self.clear_names).pack(side="left", padx=(8, 0))
 
-        # DIREITA: Caracterização anti-homônimo
         lf_profile = ttk.LabelFrame(right, text="Caracterização do investigado (anti-homônimo)", padding=10)
         lf_profile.pack(fill="x")
 
@@ -510,7 +575,6 @@ class App(tk.Tk):
             foreground="#444"
         ).pack(anchor="w", pady=(6, 0))
 
-        # DIREITA: Estratégia
         lf_strategy = ttk.LabelFrame(right, text="Estratégia de busca", padding=10)
         lf_strategy.pack(fill="x", pady=(8, 0))
 
@@ -532,7 +596,6 @@ class App(tk.Tk):
             variable=self.enable_clusters
         ).pack(side="left")
 
-        # DIREITA: Opções
         lf_opts = ttk.LabelFrame(right, text="Opções", padding=10)
         lf_opts.pack(fill="x", pady=(8, 0))
 
@@ -545,7 +608,6 @@ class App(tk.Tk):
         o2 = ttk.Frame(lf_opts); o2.pack(fill="x", pady=2)
         ttk.Checkbutton(o2, text="(Avançado) Gerar CSV-índice dos links", variable=self.build_index_csv).pack(side="left")
 
-        # DIREITA: Log
         log_box = ttk.LabelFrame(right, text="Log de auditoria", padding=10)
         log_box.pack(fill="both", expand=True, pady=(8, 0))
 
@@ -556,7 +618,6 @@ class App(tk.Tk):
         log_scroll.pack(side="right", fill="y")
         self.log_txt.config(yscrollcommand=log_scroll.set)
 
-        # Rodapé
         bottom = ttk.Frame(self, padding=(12, 6, 12, 12))
         bottom.pack(fill="x")
 
@@ -572,9 +633,6 @@ class App(tk.Tk):
         self.btn_stop = ttk.Button(bottom, text="Cancelar", command=self.on_stop, state="disabled")
         self.btn_stop.pack(side="left", padx=(8, 0))
 
-    # =========================
-    # Perfil / Settings
-    # =========================
     def _read_profile_from_ui(self) -> dict:
         return {
             "filters": {
@@ -592,9 +650,6 @@ class App(tk.Tk):
             }
         }
 
-    # =========================
-    # Placeholder / Entrada
-    # =========================
     def _set_placeholder(self):
         self.names_txt.config(fg="#666")
         self.names_txt.delete("1.0", "end")
@@ -612,7 +667,6 @@ class App(tk.Tk):
         if not content:
             self._set_placeholder()
 
-    # ações nomes
     def paste_clip(self):
         try:
             text = self.clipboard_get()
@@ -647,7 +701,6 @@ class App(tk.Tk):
         self._placeholder_active = False
         self.names_txt.config(fg="#000")
 
-    # pasta
     def choose_dir(self):
         chosen = filedialog.askdirectory(initialdir=self.out_dir.get(), title="Escolha a pasta de saída")
         if chosen:
@@ -669,7 +722,6 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível abrir a pasta: {e}")
 
-    # execução
     def on_start(self):
         if self.worker and self.worker.is_alive():
             messagebox.showinfo("Em execução", "Já existe uma execução em andamento.")
@@ -705,7 +757,6 @@ class App(tk.Tk):
             messagebox.showerror("Erro", f"Não foi possível criar/acessar a pasta de saída: {e}")
             return
 
-        # Persist settings (inclui filtros/estratégia)
         self._persist_settings()
 
         self.stop_event.clear()
@@ -795,29 +846,6 @@ class App(tk.Tk):
         }
         data.update(self._read_profile_from_ui())
         save_settings(data)
-
-# =========================
-# Helpers settings
-# =========================
-def safe_filename(name: str) -> str:
-    base = re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_")
-    return base or "resultado"
-
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-def save_settings(data: dict):
-    try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
 
 if __name__ == "__main__":
     app = App()

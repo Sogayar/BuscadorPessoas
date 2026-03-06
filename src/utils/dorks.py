@@ -1,62 +1,108 @@
-# def build_risk_dork(name: str) -> str:
-#     return (
-#         f'"{name}" '
-#         '(corrupção OR investigação OR escândalo OR fraude OR denúncia '
-#         'OR operação OR crime OR processo OR lavagem de dinheiro)'
-#     )
+from typing import Optional, Dict, List
 
-# def build_legal_dork(name: str) -> str:
-#     return f'"{name}" (processo OR ação OR réu OR acusado OR tribunal OR justiça)'
 
-# def build_social_dork(name: str) -> str:
-#     return (
-#         f'"{name}" '
-#         '(polêmica OR escândalo OR acusação OR irregularidades OR controvérsia '
-#         'OR indignação OR revolta OR crítica OR opinião OR debate OR repercussão)'
-#     )
+def _build_context(profile: Optional[Dict]) -> str:
+    """
+    Monta o contexto adicional para reduzir homônimos.
+    """
 
-# def build_news_dork(name: str) -> str:
-#     return (
-#         f'intitle:"{name}" '
-#         '(site:g1.globo.com OR site:bbc.com OR site:metropoles.com '
-#         'OR site:folha.uol.com.br)'
-#     )
+    if not profile:
+        return ""
 
-# def build_oficial_dork(name: str) -> str:
-#     return (
-#         f'"{name}" '
-#         '(site:gov.br OR site:brasil.io OR site:transparencia.gov.br'
-#         'OR site:portaltransparencia.gov.br OR site:receita.fazenda.gov.br '
-#         'OR site:senado.leg.br OR site:camara.leg.br OR site:stf.jus.br OR site:tse.jus.br)'
-#     )
+    ctx = []
 
-def get_dorks(name: str) -> list[dict]:
+    city = profile.get("city")
+    uf = profile.get("uf")
+    role = profile.get("role")
+    party = profile.get("party")
+
+    if city:
+        ctx.append(f'"{city}"')
+
+    if uf:
+        ctx.append(f'"{uf}"')
+
+    if role:
+        ctx.append(f'"{role}"')
+
+    if party:
+        ctx.append(f'"{party}"')
+
+    return " ".join(ctx)
+
+
+def _build_aliases(profile: Optional[Dict]) -> str:
+    """
+    Inclui apelidos do investigado.
+    """
+
+    if not profile:
+        return ""
+
+    akas = profile.get("akas")
+
+    if not akas:
+        return ""
+
+    parts = []
+
+    for a in akas.split(","):
+        a = a.strip()
+        if a:
+            parts.append(f'"{a}"')
+
+    return " OR ".join(parts)
+
+
+def get_dorks(
+    name: str,
+    profile: Optional[Dict] = None,
+    strategy: str = "hybrid"
+) -> List[Dict]:
+
     base = f'"{name}"'
+    context = _build_context(profile)
+    alias_query = _build_aliases(profile)
+
+    person_query = base
+
+    if strategy == "precision":
+        person_query = f'{base} {context}'.strip()
+
+    elif strategy == "hybrid":
+        if alias_query:
+            person_query = f'({base} OR {alias_query}) {context}'.strip()
+        else:
+            person_query = f'{base} {context}'.strip()
+
+    elif strategy == "wide":
+        if alias_query:
+            person_query = f'({base} OR {alias_query})'.strip()
 
     return [
 
         {
             "category": "risk",
-            "query": f'{base} (corrupção OR fraude OR investigação OR operação OR escândalo OR denúncia OR crime OR lavagem de dinheiro)'
+            "query": f'{person_query} (corrupção OR fraude OR investigação OR operação OR escândalo OR denúncia OR crime OR lavagem de dinheiro)'
         },
 
         {
             "category": "legal",
-            "query": f'{base} (processo OR ação judicial OR réu OR acusado OR condenação OR tribunal OR justiça OR inquérito)'
+            "query": f'{person_query} (processo OR ação judicial OR réu OR acusado OR condenação OR tribunal OR justiça OR inquérito)'
         },
 
         {
             "category": "social",
-            "query": f'{base} (polêmica OR controvérsia OR acusação OR crítica OR indignação OR repercussão OR debate)'
+            "query": f'{person_query} (polêmica OR controvérsia OR acusação OR crítica OR indignação OR repercussão OR debate)'
         },
 
         {
             "category": "news_major",
-            "query": f'intitle:{base} (site:g1.globo.com OR site:bbc.com OR site:folha.uol.com.br OR site:estadao.com.br OR site:metropoles.com)'
+            "query": f'intitle:{base} {context} (site:g1.globo.com OR site:bbc.com OR site:folha.uol.com.br OR site:estadao.com.br OR site:metropoles.com)'
         },
 
         {
             "category": "official",
-            "query": f'{base} (site:gov.br OR site:stf.jus.br OR site:tse.jus.br OR site:senado.leg.br OR site:camara.leg.br)'
+            "query": f'{person_query} (site:gov.br OR site:stf.jus.br OR site:tse.jus.br OR site:senado.leg.br OR site:camara.leg.br)'
         }
     ]

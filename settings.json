@@ -3,5 +3,18 @@
   "n_top": 6,
   "include_news": true,
   "include_org": true,
-  "build_index_csv": false
+  "build_index_csv": false,
+  "filters": {
+    "city": "",
+    "uf": "SP",
+    "role": "",
+    "akas": "",
+    "party": "PSOL",
+    "doc": ""
+  },
+  "strategy": {
+    "mode": "Híbrido (recomendado)",
+    "min_score": 60,
+    "enable_clusters": true
+  }
 }

@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, List
 from dotenv import load_dotenv
 
-from src.utils.identity import qualify_news  
-
+from src.utils.identity import qualify_news
 from src.utils.dorks import get_dorks
 
 # =========================
@@ -23,8 +22,7 @@ for p in DOTENV_PATHS:
         load_dotenv(p)
         break
 else:
-    load_dotenv() 
-
+    load_dotenv()
 
 TZ = ZoneInfo("America/Fortaleza")
 
@@ -53,8 +51,36 @@ UA = {
 }
 
 # Cache e anti-duplicação
-CACHE_TTL_SECONDS        = int(os.getenv("CACHE_TTL_SECONDS", "604800"))   # 7 dias
-ANTI_DUP_WINDOW_SECONDS  = int(os.getenv("ANTI_DUP_WINDOW_SECONDS", "900"))# 15 min
+CACHE_TTL_SECONDS        = int(os.getenv("CACHE_TTL_SECONDS", "604800"))    # 7 dias
+ANTI_DUP_WINDOW_SECONDS  = int(os.getenv("ANTI_DUP_WINDOW_SECONDS", "900")) # 15 min
+
+# =========================
+# HELPERS DE PERFIL/ESTRATÉGIA
+# =========================
+def normalize_strategy(strategy: str = "") -> str:
+    s = (strategy or "").strip().lower()
+    if "precis" in s:
+        return "precision"
+    if "amplo" in s or "wide" in s:
+        return "wide"
+    return "hybrid"
+
+def build_profile(
+    city: str = "",
+    uf: str = "",
+    role: str = "",
+    akas: str = "",
+    party: str = "",
+    doc: str = ""
+) -> Dict[str, str]:
+    return {
+        "city": (city or "").strip(),
+        "uf": (uf or "").strip(),
+        "role": (role or "").strip(),
+        "akas": (akas or "").strip(),
+        "party": (party or "").strip(),
+        "doc": (doc or "").strip(),
+    }
 
 # =========================
 # DB / LOG
@@ -112,10 +138,10 @@ def init_db():
     """)
     conn.commit()
 
-    seed_counter(conn, "google",   "daily",   0, GOOGLE_DAILY_LIMIT,      today_str())
-    seed_counter(conn, "serpstack","monthly", 0, SERPSTACK_MONTHLY_LIMIT, month_str())
-    seed_counter(conn, "zenserp",  "monthly", 0, ZENSERP_MONTHLY_LIMIT,   month_str())
-    seed_counter(conn, "serper",   "finite",  0, SERPER_FINITE_LIMIT,     "start")
+    seed_counter(conn, "google",    "daily",   0, GOOGLE_DAILY_LIMIT,      today_str())
+    seed_counter(conn, "serpstack", "monthly", 0, SERPSTACK_MONTHLY_LIMIT, month_str())
+    seed_counter(conn, "zenserp",   "monthly", 0, ZENSERP_MONTHLY_LIMIT,   month_str())
+    seed_counter(conn, "serper",    "finite",  0, SERPER_FINITE_LIMIT,     "start")
     conn.close()
 
 def seed_counter(conn, provider, period, count, limit_value, last_reset):
@@ -206,12 +232,12 @@ class QuotaStatus:
     limit_value: int
     last_reset: str
 
-def _fetch_quota(cur, provider: str) -> Tuple[str,int,int,str]:
+def _fetch_quota(cur, provider: str) -> Tuple[str, int, int, str]:
     cur.execute("SELECT period, count, limit_value, last_reset FROM quota_counters WHERE provider=?", (provider,))
     row = cur.fetchone()
     if not row:
         raise RuntimeError(f"Provider {provider} não configurado.")
-    return row  # period, count, limit_value, last_reset
+    return row
 
 def try_consume(provider: str, n: int = 1) -> Tuple[bool, QuotaStatus]:
     conn = get_conn()
@@ -222,13 +248,14 @@ def try_consume(provider: str, n: int = 1) -> Tuple[bool, QuotaStatus]:
 
         now_day = today_str()
         now_month = month_str()
-        if (period == "daily" and last_reset != now_day):
+
+        if period == "daily" and last_reset != now_day:
             count = 0
             last_reset = now_day
             cur.execute("UPDATE quota_counters SET count=?, last_reset=? WHERE provider=?", (count, last_reset, provider))
             log_event(provider, "reset_quota", {"period": period, "last_reset": last_reset})
 
-        if (period == "monthly" and last_reset != now_month):
+        if period == "monthly" and last_reset != now_month:
             count = 0
             last_reset = now_month
             cur.execute("UPDATE quota_counters SET count=?, last_reset=? WHERE provider=?", (count, last_reset, provider))
@@ -260,7 +287,7 @@ class GoogleProvider(ProviderBase):
     name = "google"
     def search(self, query: str) -> Dict[str, Any]:
         if not GOOGLE_API_KEY or not GOOGLE_CX:
-            raise RuntimeError("Google API KEY ou CX ausentes (.env). Docs: https://developers.google.com/custom-search/v1/overview?hl=pt-br")
+            raise RuntimeError("Google API KEY ou CX ausentes (.env).")
         url = "https://www.googleapis.com/customsearch/v1"
         params = {"key": GOOGLE_API_KEY, "cx": GOOGLE_CX, "q": query, "num": 10, "lr": "lang_pt"}
         r = requests.get(url, params=params, timeout=30)
@@ -271,7 +298,7 @@ class SerpstackProvider(ProviderBase):
     name = "serpstack"
     def search(self, query: str) -> Dict[str, Any]:
         if not SERPSTACK_KEY:
-            raise RuntimeError("SERPSTACK_KEY ausente (.env). Pricing: https://serpstack.com/pricing")
+            raise RuntimeError("SERPSTACK_KEY ausente (.env).")
         url = "http://api.serpstack.com/search"
         params = {"access_key": SERPSTACK_KEY, "query": query, "num": 10, "gl": "br", "hl": "pt"}
         r = requests.get(url, params=params, timeout=30)
@@ -282,7 +309,7 @@ class ZenserpProvider(ProviderBase):
     name = "zenserp"
     def search(self, query: str) -> Dict[str, Any]:
         if not ZENSERP_KEY:
-            raise RuntimeError("ZENSERP_KEY ausente (.env). Pricing: https://zenserp.com/pricing-plans/")
+            raise RuntimeError("ZENSERP_KEY ausente (.env).")
         url = "https://app.zenserp.com/api/v2/search"
         params = {"q": query, "hl": "pt", "gl": "br", "num": 10}
         headers = {"apikey": ZENSERP_KEY}
@@ -294,7 +321,7 @@ class SerperProvider(ProviderBase):
     name = "serper"
     def search(self, query: str) -> Dict[str, Any]:
         if not SERPER_KEY:
-            raise RuntimeError("SERPER_KEY ausente (.env). Site: https://serper.dev/")
+            raise RuntimeError("SERPER_KEY ausente (.env).")
         url = "https://google.serper.dev/search"
         headers = {"X-API-KEY": SERPER_KEY, "Content-Type": "application/json"}
         payload = {"q": query, "num": 10, "gl": "br", "hl": "pt"}
@@ -314,10 +341,6 @@ def _norm(txt: str) -> str:
     )
 
 def _parse_gnews_rss_items(xml_bytes: bytes) -> List[Dict[str, Any]]:
-    """
-    Parse sem filtro. Retorna lista de itens:
-      [{title, link, description, pubDate, source}]
-    """
     root = ET.fromstring(xml_bytes)
     items: List[Dict[str, Any]] = []
 
@@ -345,7 +368,6 @@ def _parse_gnews_rss_items(xml_bytes: bytes) -> List[Dict[str, Any]]:
     return items
 
 def _normalize_news(items: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Normaliza campos para o envelope {news: [...]}, mantendo apenas chaves padrão."""
     normed = []
     for it in items:
         normed.append({
@@ -357,10 +379,6 @@ def _normalize_news(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"news": normed}
 
 def _fetch_gnews_aggregated(person: str, max_n: int, domains: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """
-    Faz 1..N chamadas ao Google News RSS (pt-BR), agrega, deduplica e NÃO filtra.
-    Retorna (items, meta) onde items é lista de itens crus e meta traz estatísticas.
-    """
     base = "https://news.google.com/rss/search"
     q_main = f"\"{person}\"" if not (person.startswith('"') and person.endswith('"')) else person
     common = "&hl=pt-BR&gl=BR&ceid=BR:pt-419"
@@ -396,7 +414,6 @@ def _fetch_gnews_aggregated(person: str, max_n: int, domains: Optional[List[str]
         "domains_used": domains or [],
         "total_raw": len(aggregated),
     }
-    # corta no máximo para aliviar memória; o filtro depois afina
     return aggregated[: max_n * 4], meta
 
 def _gdelt_news(person: str, max_n: int = 10) -> Dict[str, Any]:
@@ -421,53 +438,22 @@ def _gdelt_news(person: str, max_n: int = 10) -> Dict[str, Any]:
             "source": a.get("domain", "")
         })
     return {"provider": "gdelt", "items": items}
+
 # =========================
 # ROUTER
 # =========================
 class QuotaAwareRouter:
     """
     Ordem de uso (busca paga geral):
-      1) Google (100/dia)
-      2) Serpstack (100/mês)
-      3) Zenserp (50/mês)
-      4) Serper (bolsa finita 2.500)
+      1) Google
+      2) Serpstack
+      3) Zenserp
+      4) Serper
 
     Notícias gratuitas:
-      - Google News RSS (aspas + domínios BR; se pouco, sem domínio)
+      - Google News RSS
       - Fallback GDELT
     """
-    def search_all_dorks(self, name: str, user_id=None):
-        """
-        Executa todos os dorks sequencialmente
-        e retorna lista estruturada por categoria.
-        """
-
-        dorks = get_dorks(name)
-        results = []
-
-        for d in dorks:
-
-            category = d.get("category")
-            query = d.get("query")
-
-            try:
-                result = self.search(query, user_id=user_id)
-
-                results.append({
-                    "category": category,
-                    "query": query,
-                    "provider": result.get("provider"),
-                    "response": result.get("response"),
-                })
-
-            except Exception as e:
-                results.append({
-                    "category": category,
-                    "query": query,
-                    "error": str(e)
-                })
-
-        return results
 
     def __init__(self):
         self.providers: Dict[str, "ProviderBase"] = {
@@ -476,6 +462,41 @@ class QuotaAwareRouter:
             "zenserp":   ZenserpProvider(),
             "serper":    SerperProvider(),
         }
+
+    def search_all_dorks(
+        self,
+        name: str,
+        user_id: Optional[str] = None,
+        profile: Optional[Dict[str, str]] = None,
+        strategy: str = "hybrid"
+    ):
+        """
+        Executa todos os dorks sequencialmente e retorna lista estruturada por categoria.
+        """
+        strategy_norm = normalize_strategy(strategy)
+        dorks = get_dorks(name, profile=profile or {}, strategy=strategy_norm)
+        results = []
+
+        for d in dorks:
+            category = d.get("category")
+            query = d.get("query")
+
+            try:
+                result = self.search(query, user_id=user_id)
+                results.append({
+                    "category": category,
+                    "query": query,
+                    "provider": result.get("provider"),
+                    "response": result.get("response"),
+                })
+            except Exception as e:
+                results.append({
+                    "category": category,
+                    "query": query,
+                    "error": str(e)
+                })
+
+        return results
 
     # -------- Busca geral (paga) --------
     def _try_provider(self, provider_key: str, query: str) -> Optional[Dict[str, Any]]:
@@ -502,7 +523,6 @@ class QuotaAwareRouter:
     def search(self, query: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         q_norm = normalize_query(query)
 
-        # anti-duplicação
         if dedup_recent(q_norm):
             cached = cache_get(q_norm)
             if cached is not None:
@@ -528,33 +548,49 @@ class QuotaAwareRouter:
         raise RuntimeError("Sem provedores disponíveis (cotas esgotadas e/ou falhas).")
 
     # -------- Notícias gratuitas (pessoa) --------
-    def search_news_free(self, person: str, user_id: Optional[str] = None, max_n: int = 10) -> Dict[str, Any]:
+    def search_news_free(
+        self,
+        person: str,
+        user_id: Optional[str] = None,
+        max_n: int = 10,
+        profile: Optional[Dict[str, str]] = None,
+        min_score: int = 40
+    ) -> Dict[str, Any]:
         person = (person or "").strip()
         if not person:
             empty = _normalize_news([])
             return {"provider": "none", "response": empty}
 
+        profile = profile or {}
         max_n = max(1, min(20, int(max_n)))
-        q_norm = f"news:{normalize_query(person)}"
+        min_score = max(0, min(100, int(min_score)))
 
-        # cache
+        # cache key contextual
+        q_norm = normalize_query(
+            f"news:{person}"
+            f"|city={profile.get('city','')}"
+            f"|uf={profile.get('uf','')}"
+            f"|role={profile.get('role','')}"
+            f"|akas={profile.get('akas','')}"
+            f"|party={profile.get('party','')}"
+            f"|doc={profile.get('doc','')}"
+            f"|min_score={min_score}"
+        )
+
         cached = cache_get(q_norm)
         if cached is not None:
             log_search(user_id, q_norm, "cache_news", True)
             log_event("news_free", "cache_hit", {"query": q_norm})
             return {"provider": "cache_news", "response": cached}
 
-        # domínios BR prioritários
         br_domains = [
             "g1.globo.com", "oglobo.globo.com", "uol.com.br", "folha.uol.com.br",
             "estadao.com.br", "veja.abril.com.br", "metropoles.com",
             "terra.com.br", "r7.com", "band.uol.com.br", "migalhas.com.br"
         ]
 
-        # 1) Google News RSS (com domains)
         items, meta = _fetch_gnews_aggregated(person, max_n=max_n, domains=br_domains)
 
-        # se vier pouco, tenta sem domains
         if len(items) < max_n:
             items2, meta2 = _fetch_gnews_aggregated(person, max_n=max_n, domains=None)
             items = (items or []) + (items2 or [])
@@ -564,11 +600,21 @@ class QuotaAwareRouter:
                 *(meta2.get("domains_used", []) if meta2 else [])
             })
 
-        # filtro por pessoa (título/descrição)
         filtered: List[Dict[str, Any]] = []
         try:
             for it in items:
-                if qualify_news(person, it.get("title", ""), it.get("description", "")):
+                if qualify_news(
+                    person=person,
+                    title=it.get("title", ""),
+                    desc=it.get("description", ""),
+                    city=profile.get("city", ""),
+                    uf=profile.get("uf", ""),
+                    role=profile.get("role", ""),
+                    akas=profile.get("akas", ""),
+                    party=profile.get("party", ""),
+                    doc=profile.get("doc", ""),
+                    min_score=min_score
+                ):
                     filtered.append(it)
         except Exception as e:
             log_event("news_free", "filter_error", {"error": str(e)})
@@ -576,13 +622,23 @@ class QuotaAwareRouter:
         provider_used = "google_news_rss"
         raw_items_for_debug = items[:10]
 
-        # fallback GDELT se vazio
         if not filtered:
             try:
                 gd = _gdelt_news(person, max_n=max_n)
                 provider_used = gd.get("provider", provider_used)
                 for it in gd.get("items", []):
-                    if qualify_news(person, it.get("title", ""), it.get("description", "")):
+                    if qualify_news(
+                        person=person,
+                        title=it.get("title", ""),
+                        desc=it.get("description", ""),
+                        city=profile.get("city", ""),
+                        uf=profile.get("uf", ""),
+                        role=profile.get("role", ""),
+                        akas=profile.get("akas", ""),
+                        party=profile.get("party", ""),
+                        doc=profile.get("doc", ""),
+                        min_score=min_score
+                    ):
                         filtered.append(it)
                 raw_items_for_debug = (gd.get("items", []) or [])[:10]
             except Exception as e:
@@ -593,6 +649,8 @@ class QuotaAwareRouter:
             "total_raw": meta.get("total_raw", 0),
             "matched": len(filtered),
             "provider_primary": provider_used,
+            "min_score": min_score,
+            "profile_used": profile,
         }
         final["raw_items"] = [
             {
@@ -623,10 +681,37 @@ def main():
     except Exception as e:
         print("search error:", e)
 
-    # Exemplo de notícias gratuitas por pessoa
+    # Exemplo de busca com contexto
+    try:
+        profile = build_profile(
+            city="Sorocaba",
+            uf="SP",
+            role="ex-prefeito",
+            akas="Joãozinho",
+            party="MDB",
+            doc=""
+        )
+
+        blocks = router.search_all_dorks(
+            name="João Silva",
+            user_id="userA",
+            profile=profile,
+            strategy="hybrid"
+        )
+        print(f"[dorks] blocos: {len(blocks)}")
+    except Exception as e:
+        print("dorks error:", e)
+
+    # Exemplo de notícias gratuitas por pessoa com contexto
     try:
         person = "Felipe Neto"
-        news_out = router.search_news_free(person, user_id="userA", max_n=6)
+        news_out = router.search_news_free(
+            person=person,
+            user_id="userA",
+            max_n=6,
+            profile=build_profile(city="", uf="", role="", akas="", party="", doc=""),
+            min_score=40
+        )
         print(f"[news_free] via {news_out['provider']} -> {len(news_out['response'].get('news', []))} itens")
         for i, n in enumerate(news_out["response"].get("news", []), 1):
             print(f"{i}. {n['title']}  |  {n['source']}  |  {n['link']}")
