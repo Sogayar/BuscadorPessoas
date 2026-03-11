@@ -352,10 +352,10 @@ def _parse_gnews_rss_items(xml_bytes: bytes) -> List[Dict[str, Any]]:
 
         src = ""
         s1 = it.find("{http://www.w3.org/2005/Atom}source")
-        if s1 is not None and (s1.text or "").strip():
+        if s1 is not None and s1.text is not None and s1.text.strip():
             src = s1.text.strip()
         s2 = it.find("source")
-        if not src and s2 is not None and (s2.text or "").strip():
+        if not src and s2 is not None and s2.text is not None and s2.text.strip():
             src = s2.text.strip()
 
         items.append({
@@ -480,6 +480,14 @@ class QuotaAwareRouter:
         for d in dorks:
             category = d.get("category")
             query = d.get("query")
+
+            if not query:
+                results.append({
+                    "category": category,
+                    "query": query,
+                    "error": "query is None or empty"
+                })
+                continue
 
             try:
                 result = self.search(query, user_id=user_id)
