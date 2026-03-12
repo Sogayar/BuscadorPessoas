@@ -1,20 +1,20 @@
 {
-  "out_dir": "C:\\Users\\Área de Trabalho\\BuscadorPessoas\\Parlamentares",
-  "n_top": 6,
+  "out_dir": "./saidas",
+  "n_top": 5,
   "include_news": true,
   "include_org": true,
-  "build_index_csv": false,
+  "build_index_csv": true,
+  "export_pdf": true,
+  "reason": "condenacoes",
   "filters": {
+    "cpf": "",
     "city": "",
+    "state": "",
     "uf": "",
-    "role": "",
-    "akas": "",
     "party": "",
-    "doc": ""
-  },
-  "strategy": {
-    "mode": "Híbrido (recomendado)",
-    "min_score": 60,
-    "enable_clusters": true
+    "role": "",
+    "organization": "",
+    "company": "",
+    "aliases": []
   }
 }

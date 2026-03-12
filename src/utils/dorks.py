@@ -1,108 +1,121 @@
-from typing import Optional, Dict, List
+from dataclasses import dataclass
+from typing import Dict, List, Sequence
+
+from src.utils.identity import IdentityProfile
 
 
-def _build_context(profile: Optional[Dict]) -> str:
-    """
-    Monta o contexto adicional para reduzir homônimos.
-    """
-
-    if not profile:
-        return ""
-
-    ctx = []
-
-    city = profile.get("city")
-    uf = profile.get("uf")
-    role = profile.get("role")
-    party = profile.get("party")
-
-    if city:
-        ctx.append(f'"{city}"')
-
-    if uf:
-        ctx.append(f'"{uf}"')
-
-    if role:
-        ctx.append(f'"{role}"')
-
-    if party:
-        ctx.append(f'"{party}"')
-
-    return " ".join(ctx)
+@dataclass(frozen=True)
+class ResearchReason:
+    key: str
+    label: str
+    keywords: Sequence[str]
+    domains: Sequence[str] = ()
+    use_news: bool = True
 
 
-def _build_aliases(profile: Optional[Dict]) -> str:
-    """
-    Inclui apelidos do investigado.
-    """
+REASONS: Dict[str, ResearchReason] = {
+    "condenacoes": ResearchReason(
+        key="condenacoes",
+        label="Condenações e decisões",
+        keywords=("condenação", "condenado", "sentença", "acórdão", "réu", "tribunal", "justiça", "improbidade"),
+        domains=("stf.jus.br", "stj.jus.br", "tjsp.jus.br", "trf1.jus.br", "jusbrasil.com.br", "cnj.jus.br"),
+    ),
+    "fraudes": ResearchReason(
+        key="fraudes",
+        label="Fraudes e esquemas",
+        keywords=("fraude", "desvio", "superfaturamento", "laranja", "empresa de fachada", "cartel", "lavagem de dinheiro"),
+        domains=("gov.br", "tcu.gov.br", "mpf.mp.br", "pf.gov.br", "mpt.mp.br", "jusbrasil.com.br"),
+    ),
+    "investigacoes": ResearchReason(
+        key="investigacoes",
+        label="Investigações e operações",
+        keywords=("investigação", "inquérito", "operação", "denúncia", "alvo", "mandado", "busca e apreensão"),
+        domains=("gov.br", "pf.gov.br", "mpf.mp.br", "cnj.jus.br", "migalhas.com.br"),
+    ),
+    "licitacoes": ResearchReason(
+        key="licitacoes",
+        label="Licitações e contratos públicos",
+        keywords=("licitação", "pregão", "contrato", "aditivo", "dispensa", "inexigibilidade", "portal da transparência"),
+        domains=("gov.br", "tcu.gov.br", "compras.gov.br", "transparencia.gov.br", "pncp.gov.br"),
+    ),
+    "midia_social": ResearchReason(
+        key="midia_social",
+        label="Presença pública e redes sociais",
+        keywords=("perfil", "biografia", "empresa", "sócio", "cargo"),
+        domains=("linkedin.com", "facebook.com", "instagram.com", "x.com", "youtube.com"),
+        use_news=False,
+    ),
+}
 
-    if not profile:
-        return ""
 
-    akas = profile.get("akas")
-
-    if not akas:
-        return ""
-
-    parts = []
-
-    for a in akas.split(","):
-        a = a.strip()
-        if a:
-            parts.append(f'"{a}"')
-
-    return " OR ".join(parts)
+def _quoted(value: str) -> str:
+    value = " ".join((value or "").split()).strip()
+    return f'"{value}"' if value else ""
 
 
-def get_dorks(
-    name: str,
-    profile: Optional[Dict] = None,
-    strategy: str = "hybrid"
-) -> List[Dict]:
+def _identity_constraints(profile: IdentityProfile) -> str:
+    extra = []
+    for value in [profile.city, profile.state, profile.party, profile.role, profile.organization, profile.company]:
+        if value:
+            extra.append(_quoted(value))
+    if profile.cpf:
+        extra.append(_quoted(profile.cpf))
+    return " ".join(extra)
 
-    base = f'"{name}"'
-    context = _build_context(profile)
-    alias_query = _build_aliases(profile)
 
-    person_query = base
+def get_reasons() -> List[Dict[str, str]]:
+    return [{"key": r.key, "label": r.label} for r in REASONS.values()]
 
-    if strategy == "precision":
-        person_query = f'{base} {context}'.strip()
 
-    elif strategy == "hybrid":
-        if alias_query:
-            person_query = f'({base} OR {alias_query}) {context}'.strip()
-        else:
-            person_query = f'{base} {context}'.strip()
+def build_dorks(profile: IdentityProfile, reason_key: str, include_social: bool = True) -> List[Dict[str, str]]:
+    reason = REASONS[reason_key]
+    base_name = _quoted(profile.full_name)
+    aliases = [a for a in profile.aliases if a.strip()]
+    identity = _identity_constraints(profile)
+    or_keywords = " OR ".join(reason.keywords)
+    dorks: List[Dict[str, str]] = []
 
-    elif strategy == "wide":
-        if alias_query:
-            person_query = f'({base} OR {alias_query})'.strip()
+    dorks.append({
+        "category": reason.key,
+        "query": f"{base_name} ({or_keywords}) {identity}".strip(),
+        "kind": "broad"
+    })
 
-    return [
+    if reason.domains:
+        domains_block = " OR ".join(f"site:{d}" for d in reason.domains)
+        dorks.append({
+            "category": f"{reason.key}_dominios",
+            "query": f"{base_name} ({or_keywords}) ({domains_block}) {identity}".strip(),
+            "kind": "official_or_targeted"
+        })
 
-        {
-            "category": "risk",
-            "query": f'{person_query} (corrupção OR fraude OR investigação OR operação OR escândalo OR denúncia OR crime OR lavagem de dinheiro)'
-        },
+    if aliases:
+        alias_block = " OR ".join(_quoted(a) for a in aliases)
+        dorks.append({
+            "category": f"{reason.key}_alias",
+            "query": f"({base_name} OR {alias_block}) ({or_keywords}) {identity}".strip(),
+            "kind": "alias"
+        })
 
-        {
-            "category": "legal",
-            "query": f'{person_query} (processo OR ação judicial OR réu OR acusado OR condenação OR tribunal OR justiça OR inquérito)'
-        },
+    if include_social:
+        dorks.extend(build_social_dorks(profile))
 
-        {
-            "category": "social",
-            "query": f'{person_query} (polêmica OR controvérsia OR acusação OR crítica OR indignação OR repercussão OR debate)'
-        },
+    return dorks
 
-        {
-            "category": "news_major",
-            "query": f'intitle:{base} {context} (site:g1.globo.com OR site:bbc.com OR site:folha.uol.com.br OR site:estadao.com.br OR site:metropoles.com)'
-        },
 
-        {
-            "category": "official",
-            "query": f'{person_query} (site:gov.br OR site:stf.jus.br OR site:tse.jus.br OR site:senado.leg.br OR site:camara.leg.br)'
-        }
+def build_social_dorks(profile: IdentityProfile) -> List[Dict[str, str]]:
+    base_name = _quoted(profile.full_name)
+    identity = _identity_constraints(profile)
+    social_sites = [
+        "site:linkedin.com/in",
+        "site:linkedin.com/company",
+        "site:facebook.com",
+        "site:instagram.com",
+        "site:x.com",
+        "site:youtube.com",
     ]
+    return [{
+        "category": "midia_social",
+        "query": f"{base_name} ({' OR '.join(social_sites)}) {identity}".strip(),
+        "kind": "social"
+    }]

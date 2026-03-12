@@ -1,74 +1,22 @@
-# Buscador de Pessoas — Tkinter + Roteamento de Cotas
+# Buscador Estratégico de Pessoas (OSINT)
 
-Ferramenta desenvolvida para **auditores, advogados e analistas**, destinada à **coleta automatizada de informações públicas sobre pessoas**.
+Ferramenta de **inteligência aberta (OSINT)** desenvolvida para investigação automatizada de pessoas em fontes públicas da internet.
 
-Dado um **nome** (e opcionalmente filtros como CPF, cidade ou UF), o sistema:
+O sistema realiza buscas estratégicas utilizando **Google Dorks**, consulta múltiplos **provedores de busca com controle de cotas**, coleta **notícias e resultados orgânicos**, extrai o **conteúdo principal das páginas** e gera **relatórios estruturados por pessoa**.
 
-- realiza **buscas orgânicas na web**
-- coleta **notícias relacionadas**
-- extrai automaticamente o **conteúdo das páginas**
-- gera **relatórios TXT e PDF**
-
-O sistema utiliza **múltiplos provedores de busca**, com:
-
-- controle automático de **cotas**
-- **cache de consultas**
-- **fallback gratuito para notícias**
-- **extração automática de conteúdo**
-
-Interfaces disponíveis:
-
-- **Tkinter (GUI)**
-- **CLI (linha de comando)**
+A aplicação possui interface gráfica em **Tkinter** e também pode ser utilizada via **CLI**.
 
 ---
 
-# Status do Projeto
+# Objetivo do Projeto
 
-> **Versão:** MVP funcional  
-> **Estágio:** Estável para uso exploratório
+O objetivo é permitir que investigadores, analistas, auditores ou advogados executem **varreduras estratégicas automatizadas sobre pessoas** utilizando técnicas de **OSINT**, obtendo rapidamente:
 
-Roadmap imediato:
+- notícias relevantes
+- menções em investigações
+- processos judiciais
+- controvérsias públicas
+- aparições em sites oficiais
+- conteúdos relevantes em páginas da web
 
-- resolução de identidade (CPF / cidade / UF)
-- melhoria de acurácia de notícias
-- conectores jurídicos (Jusbrasil, tribunais)
-- painel web
-
----
-
-# Estrutura do Projeto
-```
-├── config/
-│   ├── .env
-│   └── settings.json
-│
-├── data/
-│   └── search_quota.sqlite
-│
-├── src/
-│ ├── app/
-│ │    ├── buscador_quota.py
-│ │    └── tk_buscador_quota.py
-│ │
-│ ├── core/
-│ │    └── search_router.py
-│ │
-│ ├── connectors/
-│ │    └── jusbrasil.py
-│ │
-│ ├── utils/
-│ │   ├── extract.py
-│ │   ├── pickers.py
-│ │   ├── identity.py
-│ │   ├── exporters.py
-│ │   └── settings.py
-│ │
-│ └── worker/
-│      └── worker.py
-│
-├── outputs/
-│
-├── requirements.txt
-└── README.md
-```	
+O resultado final é consolidado em **relatórios estruturados contendo os textos extraídos das fontes encontradas**.
