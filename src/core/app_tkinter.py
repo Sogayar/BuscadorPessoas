@@ -345,12 +345,19 @@ class BuscadorWorker(threading.Thread):
 
                     category = block.get("category")
                     payload = block.get("response")
+                    error = block.get("error")
+                    provider = block.get("provider", "desconhecido")
 
                     self.log(f"\n🔹 Categoria: {category}")
                     self.log(f"Query: {block.get('query')}")
+                    self.log(f"Provider: {provider}")
+
+                    if error:
+                        self.log(f"   ⚠ Erro: {error}")
+                        continue
 
                     if not payload:
-                        self.log("   (sem retorno)")
+                        self.log("   (payload vazio)")
                         continue
 
                     news_raw = pick_news_urls(payload, n=10) if self.include_news else []

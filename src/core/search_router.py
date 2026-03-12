@@ -241,6 +241,8 @@ def _fetch_quota(cur, provider: str) -> Tuple[str, int, int, str]:
 
 def try_consume(provider: str, n: int = 1) -> Tuple[bool, QuotaStatus]:
     conn = get_conn()
+    reset_info = None
+
     try:
         conn.execute("BEGIN IMMEDIATE;")
         cur = conn.cursor()
@@ -252,14 +254,20 @@ def try_consume(provider: str, n: int = 1) -> Tuple[bool, QuotaStatus]:
         if period == "daily" and last_reset != now_day:
             count = 0
             last_reset = now_day
-            cur.execute("UPDATE quota_counters SET count=?, last_reset=? WHERE provider=?", (count, last_reset, provider))
-            log_event(provider, "reset_quota", {"period": period, "last_reset": last_reset})
+            cur.execute(
+                "UPDATE quota_counters SET count=?, last_reset=? WHERE provider=?",
+                (count, last_reset, provider)
+            )
+            reset_info = {"period": period, "last_reset": last_reset}
 
         if period == "monthly" and last_reset != now_month:
             count = 0
             last_reset = now_month
-            cur.execute("UPDATE quota_counters SET count=?, last_reset=? WHERE provider=?", (count, last_reset, provider))
-            log_event(provider, "reset_quota", {"period": period, "last_reset": last_reset})
+            cur.execute(
+                "UPDATE quota_counters SET count=?, last_reset=? WHERE provider=?",
+                (count, last_reset, provider)
+            )
+            reset_info = {"period": period, "last_reset": last_reset}
 
         if count + n > limit_value:
             conn.rollback()
@@ -268,12 +276,20 @@ def try_consume(provider: str, n: int = 1) -> Tuple[bool, QuotaStatus]:
         count += n
         cur.execute("UPDATE quota_counters SET count=? WHERE provider=?", (count, provider))
         conn.commit()
-        return True, QuotaStatus(provider, period, count, limit_value, last_reset)
+
     except Exception:
         conn.rollback()
         raise
     finally:
         conn.close()
+
+    if reset_info:
+        try:
+            log_event(provider, "reset_quota", reset_info)
+        except Exception:
+            pass
+
+    return True, QuotaStatus(provider, period, count, limit_value, last_reset)
 
 # =========================
 # PROVIDERS (pagos)
