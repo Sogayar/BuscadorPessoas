@@ -5,7 +5,7 @@
   "include_org": true,
   "build_index_csv": true,
   "export_pdf": true,
-  "reason": "condenacoes",
+  "reason": "investigacoes",
   "filters": {
     "cpf": "",
     "city": "",

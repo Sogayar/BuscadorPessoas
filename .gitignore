@@ -28,6 +28,7 @@ outputs/**
 # Local data & DBs
 data/
 *.sqlite
+saidas/
 
 # Config secrets
 .env
