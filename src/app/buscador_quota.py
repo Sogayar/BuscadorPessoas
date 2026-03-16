@@ -1,12 +1,3 @@
-"""
-buscador_quota.py
-- Busca "geral" usando provedores via QuotaAwareRouter.search()
-- Busca "Somente Notícias (pessoa)" usando QuotaAwareRouter.search_news_free()
-
-Uso:
-  python buscador_quota.py --query "site:linkedin.com/in engenheiro civil São Paulo"
-"""
-
 import os
 import sys
 import json
