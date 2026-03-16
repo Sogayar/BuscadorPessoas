@@ -8,9 +8,9 @@ from typing import Callable, Dict, List, Optional
 
 from src.core.search_router import QuotaAwareRouter
 from src.utils.extract import extract_main_text, safe_filename
-from src.utils.identity import IdentityProfile, score_identity_match
+from src.domain.identity import IdentityProfile, score_identity_match
 from src.utils.pickers import pick_news_items, pick_organic_items
-from src.utils.settings import load_settings
+from src.services.settings import load_settings
 
 
 class BuscadorWorker(threading.Thread):

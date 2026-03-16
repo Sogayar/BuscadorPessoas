@@ -19,8 +19,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from zoneinfo import ZoneInfo
 
-from src.utils.dorks import build_dorks
-from src.utils.identity import IdentityProfile, qualifies_result
+from src.domain.dorks import build_dorks
+from src.domain.identity import IdentityProfile, qualifies_result
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 for p in [os.path.join(ROOT, ".env"), os.path.join(ROOT, "config", ".env")]:

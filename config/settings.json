@@ -1,16 +1,20 @@
 {
   "out_dir": "./saidas",
-  "n_top": 3,
+  "n_top": 5,
   "include_news": true,
   "include_org": true,
-  "build_index_csv": false,
-
+  "build_index_csv": true,
   "export_pdf": true,
-  "export_html": false,
-
+  "reason": "investigacoes",
   "filters": {
     "cpf": "",
     "city": "",
-    "uf": ""
+    "state": "",
+    "uf": "",
+    "party": "",
+    "role": "",
+    "organization": "",
+    "company": "",
+    "aliases": []
   }
 }

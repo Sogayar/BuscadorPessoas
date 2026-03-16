@@ -33,6 +33,8 @@ saidas/
 # Config secrets
 .env
 config/.env
+config/.env.*
+config/settings.json
 
 # Build/Dist
 build/

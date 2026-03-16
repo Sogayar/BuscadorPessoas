@@ -1,11 +1,11 @@
 {
-  "out_dir": "./saidas",
+  "out_dir": "C:\\Users\\x07030373154\\OneDrive - Tribunal de Contas da União\\BuscadorPessoas\\saidas",
   "n_top": 5,
   "include_news": true,
   "include_org": true,
   "build_index_csv": true,
   "export_pdf": true,
-  "reason": "investigacoes",
+  "reason": "midia_social",
   "filters": {
     "cpf": "",
     "city": "",
@@ -14,7 +14,7 @@
     "party": "",
     "role": "",
     "organization": "",
-    "company": "",
+    "company": "Master",
     "aliases": []
   }
 }

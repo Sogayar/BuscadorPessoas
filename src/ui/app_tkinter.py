@@ -5,9 +5,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from src.core.search_router import init_db
-from src.core.worker import BuscadorWorker
-from src.utils.dorks import get_reasons
-from src.utils.settings import load_settings, save_settings
+from src.workers.worker import BuscadorWorker
+from src.domain.dorks import get_reasons
+from src.services.settings import load_settings, save_settings
 
 APP_TITLE = "Buscador OSINT Avançado — Identidade, Dorks e Motivo da Pesquisa"
 

@@ -1,6 +1,5 @@
 import os
 
-
 def export_html(results, name):
 
     os.makedirs("data", exist_ok=True)

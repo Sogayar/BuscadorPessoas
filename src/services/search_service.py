@@ -1,6 +1,6 @@
 from src.core.search_router import search
-from src.utils.identity import name_variants
-from src.utils.dorks import build_queries
+from src.domain.identity import name_variants
+from src.domain.dorks import build_queries
 from src.utils.extract import extract_text
 
 
